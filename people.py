@@ -5,6 +5,7 @@ import config as cfg
 import concurrent.futures
 from datetime import date
 import logging
+
 loglevel = getattr(logging, cfg.LOG_LEVEL.upper(), None)
 logging.basicConfig(filename=cfg.LOG_FILE, level=loglevel,format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
