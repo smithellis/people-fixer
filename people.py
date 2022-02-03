@@ -4,6 +4,10 @@ import sys
 import config as cfg
 import concurrent.futures
 from datetime import date
+import smtplib
+from email.message import EmailMessage
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import logging
 
 loglevel = getattr(logging, cfg.LOG_LEVEL.upper(), None)
@@ -19,6 +23,7 @@ class PeopleFixer:
         """ Startup """
         files_to_clean = ['wp_raw.csv', 'hr_raw.csv']
         PeopleFixer.check_paths(files_to_clean)
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             cleanup = {executor.submit(PeopleFixer.convert_to_clean, file): file for file in files_to_clean}
             for future in concurrent.futures.as_completed(cleanup):
@@ -32,6 +37,7 @@ class PeopleFixer:
                     sys.exit()
          
         PeopleFixer.compare_files()
+        PeopleFixer.imageemail()
 
     def check_paths(files_to_clean):
         """ Create directories as needed """
@@ -64,7 +70,9 @@ class PeopleFixer:
                     fieldnames = reader.fieldnames
                     writer = csv.DictWriter(clean_file,fieldnames=fieldnames)
                     writer.writeheader()
-
+                    with open(cfg.WP_NO_IMAGE_CSV, 'w', newline='') as noimgnew:
+                        mwriter = csv.DictWriter(noimgnew,fieldnames=reader.fieldnames)
+                        mwriter.writeheader()
                     for row in reader:
                         if 'JobCode_Descr' in row:
                             hrfile = True
@@ -75,7 +83,7 @@ class PeopleFixer:
                             if row['PayGroup_Code'] != 'Student' and row['Emplid'] not in cfg.NO_ADDS:
                                 writer.writerow(row)
                         else:
-                            wpfile = True
+                            wpfile = True                       
                             row['First Name'] = row['First Name'].capitalize()
                             row['Last Name'] = row['Last Name'].capitalize()
                             if not row['Emplid'] and row['Status']=='publish':
@@ -149,6 +157,48 @@ class PeopleFixer:
                                     mismatch_writer.writerow(wprow)
                                     logging.info(f'{wprow["Emplid"]} has an email mismatch')
         print("Comparing the clean files has finished!")
+
+    def imageemail():
+        print("Here")
+        """ Open the csv that contains our list of imageless people, and email them """
+        with open(cfg.OUTPUT_DIR+'WP-No-Image.csv', 'r') as wp_no_image_file:
+            wp_no_image_reader = csv.DictReader(wp_no_image_file)
+            for row in wp_no_image_reader:
+                if row['Email']:
+                    email = row['Email']
+                    subject = 'Please upload a photo for your profile'
+                    body = '''
+                    Hi {},
+                    I noticed that you don't have a photo on your profile.
+                    Please upload a photo for your profile.
+                    Thank you,
+                    {}
+                    '''.format(row['First Name'], cfg.WP_EMAIL_FROM)
+                    # send_email(email, subject, body)
+                    logging.info(f'Sent email to {email}')
+                else:
+                    with open(cfg.WP_NO_EMAIL_CSV, 'a', newline='') as wp_no_email_file:
+                        mwriter = csv.DictWriter(wp_no_email_file,fieldnames=wp_no_image_reader.fieldnames)
+                        mwriter.writerow(row)
+                        logging.info(f'no email')
+    
+def send_email(email, subject, body):
+    """ Send an email """
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From'] = cfg.WP_EMAIL_FROM
+    msg['To'] = email
+    msg.attach(MIMEText(body))
+
+    try:
+        server = smtplib.SMTP_SSL(cfg.WP_EMAIL_SERVER, cfg.WP_EMAIL_PORT)
+        server.ehlo()
+        server.login(cfg.WP_EMAIL_USERNAME, cfg.WP_EMAIL_PASSWORD)
+        server.sendmail(msg['From'], msg['To'], msg.as_string())
+        server.close()
+        print("mail sent")
+    except:
+        print("issue")
 
 def main():
     PeopleFixer.startup()
