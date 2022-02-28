@@ -1,5 +1,13 @@
 from datetime import date
 
+EMAIL = 'off'
+
+WP_EMAIL_FROM = ''
+WP_EMAIL_SERVER = ''
+WP_EMAIL_PORT = 465
+WP_EMAIL_USERNAME = ''
+WP_EMAIL_PASSWORD = ''
+
 LOG_LEVEL = 'DEBUG'
 LOG_FILE = str(date.today()) + '-log.txt'
 
