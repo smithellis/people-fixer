@@ -1,6 +1,6 @@
 import csv
 import os
-import sys
+import sys, getopt
 import config as cfg
 import concurrent.futures
 from datetime import date
@@ -9,9 +9,9 @@ from email.message import EmailMessage
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import logging
+from pathlib import Path
 
-loglevel = getattr(logging, cfg.LOG_LEVEL.upper(), None)
-logging.basicConfig(filename=cfg.LOG_FILE, level=loglevel,format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
+
 
 class PeopleFixer:
     def __init__(self):
@@ -19,8 +19,22 @@ class PeopleFixer:
     def __repr__(self):
         return f'PeopleFixer()'
 
-    def startup():
+    def startup(argv):
         """ Startup """
+        try:
+            opts, args = getopt.getopt(argv, "ht", ["help", "test"])
+        except:
+            print("No arguments given, or wrong arguments. Executing default run.")
+        for opt, arg in opts:
+            if opt == '-t':
+                mode = 'test'
+            elif opt in ("-h", "--help"):
+                print('PeopleFixer.py -t is Test Mode. No emails will be sent.')
+                sys.exit()
+
+        loglevel = getattr(logging, cfg.LOG_LEVEL.upper(), None)
+        logging.basicConfig(filename=cfg.LOG_FILE, level=loglevel,format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
+
         files_to_clean = ['wp_raw.csv', 'hr_raw.csv']
         PeopleFixer.check_paths(files_to_clean)
 
@@ -37,7 +51,7 @@ class PeopleFixer:
                     sys.exit()
          
         PeopleFixer.compare_files()
-        PeopleFixer.imageemail()
+        PeopleFixer.imageemail(mode)
 
     def check_paths(files_to_clean):
         """ Create directories as needed """
@@ -70,9 +84,6 @@ class PeopleFixer:
                     fieldnames = reader.fieldnames
                     writer = csv.DictWriter(clean_file,fieldnames=fieldnames)
                     writer.writeheader()
-                    with open(cfg.WP_NO_IMAGE_CSV, 'w', newline='') as noimgnew:
-                        mwriter = csv.DictWriter(noimgnew,fieldnames=reader.fieldnames)
-                        mwriter.writeheader()
                     for row in reader:
                         if 'JobCode_Descr' in row:
                             hrfile = True
@@ -95,9 +106,16 @@ class PeopleFixer:
                                     mwriter = csv.DictWriter(wp_no_email_file,fieldnames=fieldnames)
                                     mwriter.writerow(row)
                             if not row['Image Featured'] and row['Status']=='publish':
-                                with open(cfg.WP_NO_IMAGE_CSV, 'a', newline='') as wp_no_image_file:
-                                    iwriter = csv.DictWriter(wp_no_image_file,fieldnames=fieldnames)
-                                    iwriter.writerow(row)
+                                path = Path(cfg.WP_NO_IMAGE_CSV)
+                                if path.is_file():
+                                    with open(cfg.WP_NO_IMAGE_CSV, 'a', newline='') as wp_no_image_file:
+                                        iwriter = csv.DictWriter(wp_no_image_file,fieldnames=fieldnames)
+                                        iwriter.writerow(row)
+                                else:
+                                    with open(cfg.WP_NO_IMAGE_CSV, 'w', newline='') as wp_no_image_file:
+                                        iwriter = csv.DictWriter(wp_no_image_file,fieldnames=fieldnames)
+                                        iwriter.writeheader()
+                                        iwriter.writerow(row)
                             if row['Status'] == 'publish' and row['Emplid']:
                                 writer.writerow(row)
         except Exception as e:
@@ -115,8 +133,8 @@ class PeopleFixer:
                 hr_reader = csv.DictReader(hr_file)
                 wp_emplids = [x['Emplid'] for x in wp_reader]
                 hr_emplids = [x['Emplid'] for x in hr_reader]
-                not_in_wp = [x for x in hr_emplids if x not in wp_emplids]
-                not_in_hr = [x for x in wp_emplids if x not in hr_emplids]
+                not_in_wp = [x for x in hr_emplids if x not in wp_emplids if x not in cfg.NO_ADDS]
+                not_in_hr = [x for x in wp_emplids if x not in hr_emplids if x not in cfg.NO_RMS]
 
         with open(cfg.OUTPUT_DIR+'wp_clean.csv', 'r') as wp_file:
             with open(cfg.OUTPUT_DIR+'hr_clean.csv', 'r') as hr_file:
@@ -158,8 +176,7 @@ class PeopleFixer:
                                     logging.info(f'{wprow["Emplid"]} has an email mismatch')
         print("Comparing the clean files has finished!")
 
-    def imageemail():
-        print("Here")
+    def imageemail(mode):
         """ Open the csv that contains our list of imageless people, and email them """
         with open(cfg.OUTPUT_DIR+'WP-No-Image.csv', 'r') as wp_no_image_file:
             wp_no_image_reader = csv.DictReader(wp_no_image_file)
@@ -169,13 +186,35 @@ class PeopleFixer:
                     subject = 'Please upload a photo for your profile'
                     body = '''
                     Hi {},
-                    I noticed that you don't have a photo on your profile.
-                    Please upload a photo for your profile.
+
+                    This is an automated email - please don't reply!
+
+                    We noticed that you don't have a profile picture on the CVM Website. 
+                    We are now accepting profile photos form outside our standard process; this means that
+                    you can submit a photo to add to you profile that was taken elsewhere or by a non-CVM employee/contractor.
+                    Your photo will be reviewed by the CVM team and will be added to your profile.
+                    The photo requirements are:
+
+                        - Must be a JPEG
+                        - Must be less than 2MB in size
+                        - Must be a portrait
+                        - Must be in color
+                        - Must be clear
+                        - Must be in a standard ratio (2:3 is best)
+                        - Filename should be "First-Last.jpg" where First is your full legal first name, and Last is your full legal last name.
+
+                    Please submit your photo by clicking the link below.
+                    https://vet.uga.edu/headshot-collector/
                     Thank you,
                     {}
                     '''.format(row['First Name'], cfg.WP_EMAIL_FROM)
-                    # send_email(email, subject, body)
-                    logging.info(f'Sent email to {email}')
+                    if mode != 'test' or cfg.EMAIL!='off':
+                        send_email(email, subject, body)
+                        logging.info(f'Sent email to {email}')
+                        print(f'Sent email to {email}')
+                    else:
+                        print(f'Test Mode: Would have sent email to {email}')
+                        logging.info(f'Test Mode: Would have sent email to {email}')
                 else:
                     with open(cfg.WP_NO_EMAIL_CSV, 'a', newline='') as wp_no_email_file:
                         mwriter = csv.DictWriter(wp_no_email_file,fieldnames=wp_no_image_reader.fieldnames)
@@ -197,11 +236,13 @@ def send_email(email, subject, body):
         server.sendmail(msg['From'], msg['To'], msg.as_string())
         server.close()
         print("mail sent")
+        logging.info(f'Sent email to {email}')
     except:
-        print("issue")
+        print("Mail Issue")
+        logging.info(f'Mail Issue to {email}')
 
-def main():
-    PeopleFixer.startup()
-
+def main(argv):
+    PeopleFixer.startup(argv)
+    
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
