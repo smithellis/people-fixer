@@ -21,10 +21,16 @@ class PeopleFixer:
 
     def startup(argv):
         """ Startup """
+        if cfg.EMAIL == 'off':
+            mode = 'test'
+        else: 
+            mode = 'notest'
+
         try:
             opts, args = getopt.getopt(argv, "ht", ["help", "test"])
         except:
             print("No arguments given, or wrong arguments. Executing default run.")
+       
         for opt, arg in opts:
             if opt == '-t':
                 mode = 'test'
